@@ -12,7 +12,7 @@
 
 ## Homework 2 (18/12/2020)
 
-[Here](files/hw2/hw.html) is my data visualization and correlation analysis about some of Turkey's economic measures
+[Here](files/hw2/hw2.html) is my data visualization and correlation analysis about some of Turkey's economic measures
 
 [Here](files/hw2/hw2.rmd) is my code
 
