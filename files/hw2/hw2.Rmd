@@ -1,0 +1,145 @@
+---
+title: "Homework 2"
+author: "Dorukhan Kılınç - IE360 - Fall 2020"
+date: "December 17, 2020"
+output:
+  html_document: default
+---
+# 1.Introduction
+
+Inflation is a general, continuous increase in the prices calculated by comparing two consumer price indexes from different years. In Turkey's economy, rapidly increasing inflation has been a major problem damaging both consumers and producers for a long time. It damages consumers in the sense that as inflation increases, so does the price of the goods and producers in the sense that interest rates go upwards to compensate the inflation rate. Inflation rate affects unemployment rate as well. 
+
+The aim of this homework is to examine inflation rate by looking at Turkey's consumer price index and try to find the answer of **"Are inflation rate, interest rate and unemployment rate related?"**.
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(data.table)
+library(knitr)
+library(zoo)
+library(readxl)
+library(ggcorrplot)
+library(lubridate)
+library(GGally)
+
+```
+
+# 2.Data Manipulation and Visualization
+
+### a.Data Manipulation
+
+The datasets with which I will try to find correlation relationships are taken from [EVDS](https://evds2.tcmb.gov.tr/). In this dataset, CPI's are calculated based on taking CPI of 2003 equal to 100.
+
+```{r manip}
+
+#Datasets are manipulated so that their dates coincide
+
+CPI = read_excel("cpi.xlsx", range = "A52:B150", col_names = c("Date", "Index"))
+
+
+Interest_Rate = read_excel("faiz_oranları.xlsx", range = "A52:B150", col_names = c("Date", "Interest Rate"))
+
+Unemployment_Rate = read_excel("işsizlik.xlsx", range = "A54:B152", col_names = c("Date", "Unemployment Rate"))
+
+#Datasets are merged in one data table
+
+dt = data.table(Date = CPI$Date, ConsumerPriceIndex = CPI$Index, InterestRate = Interest_Rate$`Interest Rate`, UnemploymentRate = Unemployment_Rate$`Unemployment Rate`)
+
+#Manipulate date column to make it time object by adding a day
+
+dt$Date<-parse_date_time(dt[,Date], "Ym")
+dt[,Date := as.Date(Date, format='%Y-%m-%d')]
+
+head(dt)
+```
+
+### b.Data Visualization
+
+```{r histCPI, echo=FALSE}
+
+ggplot(dt, aes(x = ConsumerPriceIndex) )+
+                     geom_histogram(aes(y = ..density..),bins = 30, fill = "light blue") +
+                      geom_density(alpha = 0.2)+
+                    theme_minimal() + facet_wrap(~year(Date)) + labs(title = "Histograms of Monthly Consumer Price Index in Turkey over 2012-2020",x = "Monthly CPI")
+
+
+```
+
+By looking at the histograms, we can say that CPI increases over years. This is because of inflation. As inflation exists, price of the goods increase over years. 
+
+```{r lineCPI, echo=FALSE}
+
+ggplot(dt, aes(x = Date, y = ConsumerPriceIndex)) + geom_line(color = "dark blue") + theme_minimal() + labs(title = "Line Graph of CPI in Turkey over 2012-2020", y = "CPI")
+
+```
+
+Line plot shows us the upwards trend of CPI clearly. By looking at the plot, we can say that increase in CPI in the last half of the graph is greater. This can be explained with the constant devaluation of TL in the last couple of years. 
+
+
+
+
+```{r histInterestRate, echo=FALSE}
+
+ggplot(dt, aes(x = InterestRate)) + geom_histogram(aes(y = ..density..),bins = 30, fill = "light blue") + geom_density(alpha = 0.2) + theme_minimal() + facet_wrap(~year(Date)) + labs(title = "Histograms of Monthly Interest Rate in Turkey over 2012-2020", x = "Monthly Interest Rate")
+
+
+```
+
+Interest rate histograms shows us no apparent trend or yearly distribution. If there were a trend like CPI has, it would have been said that there was an observable relation between CPI and Interest rates. For further comments about that, we need correlation analysis.  
+
+
+```{r histUnemploymentRate, echo=FALSE}
+ggplot(dt, aes(x = UnemploymentRate)) + geom_histogram(aes(y = ..density..), bins = 30, fill = "light blue") + geom_density(alpha = 0.2) + theme_minimal() + facet_wrap(~year(Date)) + labs(title = "Histograms of Monthly Unemployment Rate in Turkey over 2012-2020", x = "Monthly Unemployment Rate")
+```
+
+While not as clear as the upwards trend of CPI, unemployment rate seems to increase each year as well. They can be correlated. 
+
+```{r boxplotUnemployment, echo = FALSE}
+
+ggplot(dt, aes(x = Date, y = UnemploymentRate, group = year(Date))) + geom_boxplot(fill = "light blue") + theme_minimal() + labs(title = "Boxplots of Unemployment Rate in Turkey over 2012- 2020", y = "Unemployment Rate") + scale_x_date(date_breaks = "1 year", date_labels = "%Y")
+
+```
+
+Above boxplot of unemployment rates shows the upwards trends of unemployment more visible than the histograms do. Since monthly data for each year are combined for each box, boxes are located at the middle of the each year. Therefore, for example, the boxplot between 2014 and 2015 contains the data from 2014.  
+
+```{r lineCombined, echo=FALSE}
+ggplot(dt, aes(x = Date)) + geom_line(aes(y = ConsumerPriceIndex /10, color = "Consumer Price Index")) + geom_line(aes(y = UnemploymentRate, color = "Unemployment Rate")) + geom_line(aes(y = InterestRate, color = "Interest Rate")) + theme_minimal() + labs(title = "Line Graphs of Monthly CPI, Interest Rate and Unemployment Rate", y = NULL, color = "Legend") + scale_color_manual(values = c("dark blue", "dark red", "dark green"))
+```
+
+Before moving to correlation analysis, figure above shows all three datasets together. Since CPI is always greater than 200, to be able to show all three together, It is divided by 10 in this graph. While there is no noticeable trend followed by interest rate, it is visible that both CPI and unemployment rate follows an upwards trend. 
+
+# 3.Correlation Analysis
+
+```{r corrGraph, echo=FALSE}
+ggpairs(dt[,c(2:4)]) + labs(title = "Paired Correlation Graphs")
+```
+
+The figure Above shows the correlations between data points. While there is no significant correlation between CPI and interest rate, there clearly is a strong correlation between CPI and unemployment rate. For further information there is the correlation matrix below.
+
+```{r corrMatrix, echo=FALSE}
+cor(dt[, c(2:4)])
+```
+
+Correlation matrix gives us the correlation values clearly. Notice that the matrix is a symmetric matrix with diagonals equal to 1 because its rows and columns contain the same datasets and the correlation of a dataset to itself is equal to 1 by the definition of correlation. From the correlation graphs and the correlation matrix, it is safe to say that interest rate has no statistically significant correlation with neither CPI nor interest rate. On the other hand, CPI and unemployment rate seems to be correlated, which will be explained in more detail.
+
+### Correlation between Consumer Price Index and Unemployment
+
+Since it is found that CPI and unemployment rate are strongly correlated, a further detailed correlation test is also put in the report.
+
+```{r corrTest, echo=FALSE}
+cor.test(dt$UnemploymentRate, dt$ConsumerPriceIndex)
+```
+
+Apart from the correlation value found in the above analysis, this correlation test includes a p value, which is important because it is used while testing hypothesis in confidence intervals. Notice p value has a very small value, meaning that the null hypothesis that CPI and unemployment are not correlated can be rejected. So, we can say that CPI and unemployment rate have a relationship. The reason behind this relationship may be that inflation could cause an increase in the unemployment and because inflation is calculated by the change in the CPI, rapid increases in the CPI may cause unemployment rates to go up. 
+
+
+
+# 4.Conclusion
+
+In conclusion, aim of this study was to find whether or not there is a correlation between CPI, unemployment rate and interest rate in Turkey. To investigate it, monthly data of this measures from 2012 to 2020 are taken and manipulated. Correlation analysis showed that while there was no visible correlation with regards to interest rate and the other two measures, CPI and unemployment rate were strongly correlated. This shows there exists a positive correlation between inflation and unemployment rates. In addition, this correlation may be stemming from the declining economy of Turkey.      
+
+
+
+#### References
+[EVDS](https://evds2.tcmb.gov.tr/)
