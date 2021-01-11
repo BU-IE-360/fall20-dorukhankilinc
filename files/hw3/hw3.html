@@ -2198,6 +2198,10 @@ predict(final_fit, dt[108])</code></pre>
 <h1>4.Conclusion</h1>
 <p>In this homework, I tried to predict clothing and footwear CPI using time series modeling approach and other independent variables. Firstly, I tried to make our series stationary by adjusting trend and seasonality components. Then, I used independent variables to make residual terms in the form of a white noise series, independent, normally distributed with mean zero and a constant variance. Note that this variables were not some randomly chosen unrelated ones. I firstly hypothesized about their probable relationship with CPI. USD/TRY exchange rate seemed to be relevant because Turkey’s clothing and footwear industry depends highly on exports. Commercial interest rate seemed relevant because sellers were affected by it. However, even after adding independent variables into the model, there still were some issues with autocorrelation and variance of the residuals. To take care of these, at first, I tried to add a nonlinear term and then an autoregressive term. Latter worked out better, so I kept it. But, there still was correlation and not constant variance in the residuals. Adding another autoregressive term made the model better and final. The final model was able to predict the next month’s CPI value with a little error.</p>
 <p>In this part of conclusion I will talk about the potential problems of our model. First of all, because there was not any test data, we can not know for sure if the model is overfitting. We need to have further test data to study it. Secondly, our data consists of 2 autoregressive terms. This means that while we may have pretty accurate predictions in short term, because the model will try to predict new values using the ones it predicted, our accuracy will most likely drop. Such problems need further and detailed examination and tests with data not used in training of the model. Nevertheless, our model did a pretty good job and assured the assumptions of residuals.</p>
+<div id="appendix" class="section level5">
+<h5>Appendix</h5>
+<p><a href="hw3.Rmd">Here</a> is My rmd file.</p>
+</div>
 </div>
 
 

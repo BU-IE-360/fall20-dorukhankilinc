@@ -368,6 +368,6 @@ In this homework, I tried to predict clothing and footwear CPI using time series
 
 In this part of conclusion I will talk about the potential problems of our model. First of all, because there was not any test data, we can not know for sure if the model is overfitting. We need to have further test data to study it. Secondly, our data consists of 2 autoregressive terms. This means that while we may have pretty accurate predictions in short term, because the model will try to predict new values using the ones it predicted, our accuracy will most likely drop. Such problems need further and detailed examination and tests with data not used in training of the model. Nevertheless, our model did a pretty good job and assured the assumptions of residuals. 
 
-
-
+##### Appendix
+[Here](hw3.Rmd) is My rmd file.
 
