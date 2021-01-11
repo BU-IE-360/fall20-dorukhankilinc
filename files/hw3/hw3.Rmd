@@ -1,0 +1,373 @@
+---
+title: "Homework 3"
+author: "Dorukhan Kılınç"
+date: "1/9/2021"
+output:
+  html_document:
+    code_folding: hide
+    theme: yeti
+    toc: true
+    toc_depth: 3
+    toc_float: true
+  pdf_document: default
+
+---
+
+# 1.Introduction
+
+Consumer Price Index (CPI) is a commonly used measure for comparing economic conditions of different times. To calculate CPI, firstly, a basket of goods is determined. Then, based on this basket, the total amount of money needed to buy all the goods to fill it is calculated. A convention while calculating CPI is to set a year, usually the first year we have, as the base year and set its CPI to 100. Other CPI values are also adjusted according to the base year so that the ratio of different CPI values stays the same as before. Such a convention is useful because it directly shows the percentage change in CPI without any operation needed. Consequently, we get a series of CPI values with which we can make some observations about the economic conditions. It is important to note that the general behavior of CPI is to increase over years because of the inflation. As the value of the money decreases, cost of the goods in the basket increases over time, resulting in an increase in the CPI. However, CPI values are useful because they reflect how fast and much the economic conditions change. Also, because CPI values are calculated with respect to the basket determined by the researcher, they offer a wide spectrum of investigation.
+
+This homework aims to predict clothing and footwear CPI value of December 2020 in Turkey using past CPI values and some other values hypothesized to influence the changes in CPI. To hypothesize the influencing factors, it is crucial to understand what CPI reflects. As stated in the first part of introduction, CPI is calculated with respect to a fixed basket of goods. In this case, this basket consists of clothing and footwear. Therefore, a change in the prices of them directly changes CPI. **Here are some potential independent variables:** 
+
+* Because foreign companies have a large market share in the clothing and footwear markets, one of the influences in CPI may be **exchange rate of dollar to tl**. In addition, I hope exchange rate will be able to reflect the effect of inflation on CPI. 
+
+* Another influence may be **average commercial interest rate for bank loans** since a seller will increase the prices to compensate a higher interest rate for loans. 
+
+* There exists a relationship between price of the goods and the demand for them. For our model to reflect such a relationship, the relationships between CPI and **Consumer Confidence Index (CCI)**, **general economic situation expectation** and **expectation for consumer prices change rate** will be investigated. Although these factor do not directly represent the demand, I hope that they will be able to explain the behavior of the demand.
+
+Lastly, I expect there to be some **seasonal components** because naturally people buy different kind of clothes as the seasons change and there will be some end of season discounts because sellers will want to get rid of the clothing and footwear of previous season.
+
+# 2.Data Manipulation, Visualization and Regression Analysis
+
+In this part, we will try to understand how our data are connected and try to build a model to forecast CPI values using appropriate variables.
+
+## a.Data Manipulation
+
+Data is taken from [EVDS](https://evds2.tcmb.gov.tr/). Each column starts with a data at January 2012 and ends with a data at November 2020.
+
+```{r, message=FALSE}
+library(data.table)
+library(knitr)
+library(zoo)
+library(readxl)
+library(corrplot)
+library(ggplot2)
+library(lubridate)
+library(forecast)
+library(urca)
+#Read the data and create a data table
+dt = data.table(read_excel("Data.xlsx", range = "A2:G108", col_names = c("Date", "Dollar_Rate", "Interest_Rate", "CPI", "CCI", "Exp_Sit", "Exp_CPI")))
+
+#Manipulate the order of the columns so that CPI appears first
+dt = setcolorder(dt, c("Date", "CPI", "Dollar_Rate", "Interest_Rate", "CCI", "Exp_Sit", "Exp_CPI"))
+
+#Manipulate Date column so that the type of it becomes date instead of character
+dt$Date = parse_date_time(dt$Date, "Ym")
+dt[,Date:=as.Date(Date,format='%Y-%m-%d')]
+
+head(dt)
+```
+
+Before we move onto the next part, here is the list and explanation of variables and column names:
+
+* **Date:** Since the data is monthly, to create time objects, each date is assigned to the first day of months.
+
+* **CPI:** Clothing and footwear CPI. From now on, I will refer to it as only CPI.
+
+* **Dollar_Rate:** USD/TRY exchange rate.
+
+* **Interest_Rate:** Average commercial interest rate for bank loans.
+
+* **CCI:** Consumer Confidence Index.
+
+* **Exp_Sit:** General economic situation expectation 
+
+* **Exp_CPI:** Expectation for consumer prices change rate.  
+
+## b.Basic Visualization and Predictions
+
+In this part, we will look at behavior of each variable and try to predict the correlation between CPI and them. 
+
+```{r}
+#A new data table without the date column
+dt_1 = dt[, -1]
+plot(zoo(dt_1), main = "Behavior of Each Variable from 2012 to 2020")
+```
+
+By comparing CPI and Dollar_Rate, we can say that they seem to have a similar trend. In addition, as we expected, there are also some seasonal fluctuations in CPI. Interest rate seem to have a trend until last 20 months. Lastly, we can say that CCI, Exp_Sit and Exp_CPI seem to have a strong correlation with each other because their behavior looks similar. This is strongly related to the fact that they all reflect the general expectation towards next year's economy. Therefore, using one of them would be enough to forecast CPI values. For further predictions, we need correlation analysis.
+
+Notice that to make CPI stationary, we need to have a trend and some seasonal components in our time series regression model. Before moving onto further analysis, we will add some new columns to our data table to use in further analysis.
+
+```{r}
+#To simulate the trend we add a trend variable equal to the index of each observation.
+dt[, trend:=1:.N]
+
+#Adding a column denoting months of each observation.
+dt[, month:=trend %% 12]
+dt[month == 0, month := 12]
+
+head(dt)
+```
+
+Here is the first 6 observations with trend and month columns added. Trend column has the value of the index of each observation while month column displays the month of the  observation.
+
+
+## c.Correlation Plot and Analysis
+
+Now that we have seen each independent variable's general behavior, we can go for deeper analysis.
+
+```{r}
+
+corrplot(cor(dt_1), method = "number", type = "upper")
+
+```
+
+Notice that there exists a strong correlation between CPI and Dollar_Rate as we expected. Similarly, CCI, Exp_Sit and Exp_CPI are also strongly correlated. Therefore, I will not use Exp_Sit and Exp_CPI in my regression model. Additionally, CCI and Exp_CPI are negatively correlated.
+
+## d.Regression Models
+
+Before introducing independent variables, we will try to have a stationary series by adjusting CPI with trend and seasonality. Lets take another look to CPI before trying to model anything.
+
+```{r}
+par(mfrow=c(1,2))
+
+plot(x=dt$Date, y=dt$CPI, xlab="Date", ylab="CPI", type ='l', main="CPI values 2012-2020")
+
+acf(dt$CPI, lag.max = 12, main ="Autocorrelation Function for CPI")
+```
+
+While a basic line plot clearly shows the trend and seasonality of CPI, autocorrelation values at different lags also tells us that there is some kind of seasonality in CPI.
+
+### First Model (using Trend)
+
+This model will try to get rid of the trend of CCI and have a better understanding at the seasonality. 
+
+```{r}
+
+fit1 = lm(formula = CPI~trend, data = dt)
+
+summary(fit1)
+```
+
+By looking at adjusted R-squared value and p value of the model, we can say that trend component is significant to our model. From now on, we will try to improve our model by looking at the behavior of the residuals and try to make them distributed normal, independent and with mean 0 and constant variance.
+
+Now that we have detrended our series, let's analyze the residuals to see the seasonal components.
+
+```{r}
+checkresiduals(fit1, lag = 12)
+```
+
+Autocorrelation values tells us that CPI values contain some kind of seasonality with a maximum at lag 12. Breusch-Godfrey test for serial correlation also points to it with a significantly small p value. We will improve our model by adding seasonal components. 
+
+Notice that the residuals follow a decreasing trend at the first half and then increase again. Adding seasonality will not take care of that. Maybe adding independent variables can solve this. Additionally, we can say that residuals seem to follow a normal-like distribution. 
+
+### Adding Seasonality
+
+```{r}
+fit2 = lm(formula = CPI~trend+as.factor(month), data = dt)
+
+summary(fit2)
+```
+
+By comparing adjusted R-squared values and residual standard errors, we can say that our model's ability to predict CPI is increased. We can see that there are some months which seem to be insignificant to our model, but omitting them would be pointless for our assumption that CPI has a seasonality component. Let's take a look at the new residuals to see how adding monthly components affected them.
+
+```{r}
+checkresiduals(fit2)
+```
+
+While we can say that adding monthly factors helped our model, we still have some problems with our model. First of all, the firstly decreasing and then increasing trend of the residuals is more apparent than before. Secondly, last part (after month 80) of the residuals have a higher variance than the other parts, which shows itself in the distribution of the residuals as the outlier parts. Lastly, there still exists some kind of correlation between CPI values. Let's add the independent variables to see how they affect our model.
+
+### Adding Independent Variables
+
+Before modifying our model, it is a good idea to check independent variables and how they seem to be related to CPI and residuals
+
+```{r}
+par(mfrow = c(2,2))
+
+plot(x=dt$CPI, y=dt$Dollar_Rate, xlab="CPI", ylab="USD/TRY Exchange Rate",
+     main = "CPI vs USD/TRY Exchange Rate")
+
+plot(x=dt$CPI, y=dt$CCI, xlab="CPI", ylab="CCI",
+     main = "CPI vs CCI")
+
+plot(x=dt$CPI, y=dt$Interest_Rate, xlab="CPI", ylab="Commercial Interest Rate",
+     main = "CPI vs Commercial Interest Rate")
+
+```
+
+Notice the strong positive correlation between USD/TRY exchange rate we found in correlation analysis presents itself in the first graph. In the plot with CCI, we see a negative correlation, but not a strong one like the first plot. Finally, CPI vs Commercial Interest Rate plot shows an increasing behavior on the first half but the second part doesn't seem to be related. Now let's add them to our model and examine the change.
+
+#### Adding USD/TRY Exchange Rate
+
+```{r}
+fit3 = lm(formula = CPI~trend+as.factor(month)+Dollar_Rate, data = dt)
+
+summary(fit3)
+```
+
+Adjusted R-squared value and residual standard error shows that our model has improved with the addition of USD/TRY exchange rate. In addition, by checking p value of Dollar_Rate, we can say that it is statistically relevant to our model. Let's check residuals to see how their behavior changed.
+
+```{r}
+checkresiduals(fit3, lag = 12)
+```
+
+With the addition of USD/TRY exchange rate, the trend we observed in residuals seems to have gone away. However, variance of the last part still seems to be greater than the first parts. In addition, autocorrelation value with lag 1 is significantly high, maybe there should be a autoregressive term in our model.
+
+#### Adding CCI
+
+```{r}
+fit4 = lm(formula = CPI~trend+as.factor(month)+Dollar_Rate+CCI, data = dt)
+
+summary(fit4)
+```
+
+Although our model seems to be improved with CCI, since its p value is not small enough, I will not include CCI. CCI does not seem to be relevant enough to stay in our model.
+
+#### Adding Commercial Interest Rate
+
+```{r}
+fit5 = lm(formula = CPI~trend+as.factor(month)+Dollar_Rate+Interest_Rate, data = dt)
+
+summary(fit5)
+```
+
+Our model has improved, p value of Interest is significantly small. We can keep Interest_Rate. Let's check the residuals.
+
+```{r}
+checkresiduals(fit5)
+```
+
+Only difference from our model with Dollar_Rate is that in this model, although still high, autocorrelation values seem to be decreased. 
+
+After adding independent variables, we still couldn't get rid of the high autocorrelation of residuals with small lags. It may be reasonable to add a autoregressive term to our model. However, before that, we will analyze residuals further to see if there is another kind of connection. 
+
+## e.Residual Analysis
+
+Residual analysis is crucial for the improvement our model because we expect to see a normally distributed and independent white noise series with mean zero. Therefore, by looking at residuals, we can point out the missing parts of our model. We will plot the residuals and each variable to see any kind of nonlinear connection.
+
+```{r}
+plot(y=residuals(fit5), x=dt$Dollar_Rate, ylab="Residuals", xlab="USD/TRY Exchange Rate", main = "USD/TRY Exchange Rate vs Residuals")
+
+```
+
+There seems no apparent connection between residuals and USD/TRY exchange rate. It seems we were able to model the part of USD/TRY exchange rate in our regression model successfully with a linear part.
+
+Now, let's look at commercial interest rate.
+
+```{r}
+plot(y=residuals(fit5), x=dt$Interest_Rate, ylab="Residuals", xlab="Commercial Interest Rate", main = "Commercial Interest Rate vs Residuals")
+
+```
+
+Again, Commercial Interest Rate doesn't seem to have a nonlinear relationship with residuals. Our current model with commercial interest rate seems to be okay.
+ 
+Now, although our model doesn't contain a CCI component, it is not a bad idea to look for a nonlinear relationship between CCI and CPI. Our model has an increasing variance problem at the last 20 months, therefore, by looking at CCI vs CPI, maybe we can find a way of modeling it.
+
+```{r}
+par(mfrow=c(1,2))
+plot(y=residuals(fit5), x=dt$CCI, ylab="Residuals", xlab="CCI", main = "CCI vs Residuals")
+
+plot(y=dt$CPI, x=dt$CCI, ylab="CPI", xlab="CCI", main = "CCI vs CPI")
+
+```
+
+Notice that there is some kind of a nonlinear relationship between CCI and CPI. It is like a classification where lower values of CCI are almost always correlated with higher values of CPI. Remember that CCI was the consumer confidence index and it makes sense that and  lower confidence is associated with higher values of CPI. However, looking at CCI vs residuals, we see a absolute value-like relationship changing behavior at CCI equals some value between 85 and 90, say 87. We will model it as a combination of piecewise defined functions. 
+
+```{r}
+
+dt[, absCCI:=abs(CCI-87)]
+
+dt[, part1:=0]
+dt[CCI <= 87, part1 := absCCI]
+
+dt[, part2:=0]
+dt[CCI > 87, part2 := absCCI]
+
+fit6 = lm(formula = CPI~trend+as.factor(month)+Dollar_Rate+Interest_Rate+part1+part2, data = dt)
+summary(fit6)
+```
+
+Adding CCI into our model as a nonlinear component improved our model. Notice that part1 has a significantly small p value, meaning it is highly relevant to our model. Remember that when we added CCI as a whole, it didn't seem related to our model. Such a absolute value-like relationship makes sense because as the people become less confident about economy, below a certain level, their expectations start to come true. However, part2 doesn't seem to be relevant. Maybe other components were able to forecast its effect. I will exclude part2 in further analysis.
+
+Now, let's check how the addition of CCI component changed residuals.
+
+```{r}
+fit7 = lm(formula = CPI~trend+as.factor(month)+Dollar_Rate+Interest_Rate+part1, data = dt)
+checkresiduals(fit7)
+```
+
+Notice that the distribution of residuals became more symmetric. That is something we wanted to have. However, there is still a very high autocorrelation value at lag 1. There is a possibility that our model needs a autoregressive component; so, I will plot CPI and change in CPI with residuals separately. 
+
+```{r}
+par(mfrow = c(1,2))
+
+plot(x=residuals(fit7), y=dt$CPI, xlab="Residuals", ylab="CPI", main = "CPI vs Residuals")
+
+plot(x=residuals(fit7)[-1], y=diff(dt$CPI), xlab="Residuals", ylab="Change in CPI", main = "Change in CPI vs Residuals")
+
+```
+
+By looking at plots of CPI vs residuals and change in CPI vs residuals, we can say that second plot has a more symmetric distribution. Now I will add an autoregressive component with lag 1. 
+
+```{r}
+#Create a column containing CPI values of previous column
+dt[, prev := shift(CPI, n = 1, type = "lag") ]
+
+#Perform linear regression but exclude the 1st row because it does not contain a previous CPI value.
+fit8 = lm(formula = CPI~trend+as.factor(month)+Dollar_Rate+Interest_Rate+part1+prev, data = dt[complete.cases(dt),])
+
+summary(fit8)
+checkresiduals(fit8)
+```
+
+While adding autoregressive component helped our model, CCI component and intercept have lost their significance and there still exists some kind of correlation as p value for Breusch-Godfrey test is significantly small. In final model, I will exclude CCI component and intercept. As to take care of autocorrelation problem, I will add another autoregressive term with lag 2 and evaluate the resulting model.
+
+# 3.The Final Model and Prediction of CPI value of December 2020
+
+## a.The Final Model
+
+```{r}
+
+dt[, prev2 := shift(CPI, n = 2, type = "lag") ]
+
+final_fit = lm(formula = CPI~0+trend+as.factor(month)+Dollar_Rate+Interest_Rate+prev+prev2, data = dt[complete.cases(dt),])
+
+summary(final_fit)
+checkresiduals(final_fit)
+```
+
+Here above are the summary and residual analysis of our final model. Notice that addition of the second lag term took care of the autocorrelation and changing variance problems of our models. Now let's see actual CPI values with predicted ones together.
+
+```{r}
+#Since we used 2 lag terms, our mode couldn't predict first 2 values.
+dt[,fitted:=c(NA,NA,final_fit$fitted.values)]
+
+cols <- c("predicted" = "red", "actual" = "royalblue")
+
+ggplot() + 
+  geom_line(data = dt[complete.cases(dt),], aes(x = Date, y = fitted, color = "predicted"), size=0.75) +
+  geom_line(data = dt[complete.cases(dt),], aes(x = Date, y = CPI, color = "actual"), size=0.75) +
+  labs(title = "Fitted vs Actual", x = "Date", y = "CPI") +
+  theme_minimal() +
+  scale_color_manual(values = cols)
+```
+
+Here our predictions and actual values are plotted together. As we could have said by looking at the adjusted r-squared value, our model seems to encapsulate the behavior of the CPI over years. However, there may be a problem of overfitting as we have a model that is so good at predicting CPI in our training data. I will discuss this further in the conclusion. Now we can predict the value.
+
+## b.Prediction
+
+Since this homework is done in January 2021 and our prediction value is for December 2020, I have the parameters needed. Therefore I will use them to predict CPI value. However, usually, we don't have the relevant values for the value we are trying to predict as we are trying to forecast it. In addition, I also have the CCI value for December 2020, which is 264.54.
+
+```{r}
+dt = rbind(dt, data.table(Date=as.Date("2020-12-01")),fill=T)
+dt[108, Dollar_Rate := 7.7211]
+dt[108, trend := 108]
+dt[108, month := 12]
+dt[108, Interest_Rate := 18.9700]
+dt[108, prev := 273.24]
+dt[108, prev2 := 269.32]
+
+predict(final_fit, dt[108])
+```
+
+The model was able to predict the CPI value for December 2020 with %1.52 margin of error. It seems it did a good job at predicting the next month's CPI value.
+
+# 4.Conclusion
+
+In this homework, I tried to predict clothing and footwear CPI using time series modeling approach and other independent variables. Firstly, I tried to make our series stationary by adjusting trend and seasonality components. Then, I used independent variables to make residual terms in the form of a white noise series, independent, normally distributed with mean zero and a constant variance. Note that this variables were not some randomly chosen unrelated ones. I firstly hypothesized about their probable relationship with CPI. USD/TRY exchange rate seemed to be relevant because Turkey's clothing and footwear industry depends highly on exports. Commercial interest rate seemed relevant because sellers were affected by it. However, even after adding independent variables into the model, there still were some issues with autocorrelation and variance of the residuals. To take care of these, at first, I tried to add a nonlinear term and then an autoregressive term. Latter worked out better, so I kept it. But, there still was correlation and not constant variance in the residuals. Adding another autoregressive term made the model better and final. The final model was able to predict the next month's CPI value with a little error.
+
+In this part of conclusion I will talk about the potential problems of our model. First of all, because there was not any test data, we can not know for sure if the model is overfitting. We need to have further test data to study it. Secondly, our data consists of 2 autoregressive terms. This means that while we may have pretty accurate predictions in short term, because the model will try to predict new values using the ones it predicted, our accuracy will most likely drop. Such problems need further and detailed examination and tests with data not used in training of the model. Nevertheless, our model did a pretty good job and assured the assumptions of residuals. 
+
+
+
+

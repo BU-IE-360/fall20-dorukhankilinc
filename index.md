@@ -16,3 +16,6 @@
 
 [Here](files/hw2/hw2.rmd) is my code
 
+## Homework 3 (12/01/2021)
+
+[Here](files/hw3/hw3.html) is my time series regression model for clothing and footwear CPI 
