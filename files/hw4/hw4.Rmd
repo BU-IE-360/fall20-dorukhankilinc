@@ -1,0 +1,241 @@
+---
+title: "Homework 4"
+author: "Dorukhan Kılınç"
+date: "1/29/2021"
+output:
+  html_document:
+    code_folding: hide
+    theme: yeti
+    toc: true
+    toc_depth: 3
+    toc_float: true
+  pdf_document: default
+---
+
+# 1.Introduction
+
+In this homework my purpose is to forecast next 2 weeks of daily electricity consumption by using data between 01.01.2017-08.01.2021 and analyze my predictions by comparing them with the real values. Firstly, I will try to make the daily electricity consumption as stationary as possible because stationarity of the residuals is a crucial assumption for forecasting. To achieve stationarity, we should detrend and deaseasonalize the data and check for autocorrelation at lags. Then, I will use a suitable arima model to successfully model the residuals. After achieving a forecast for the residual values, I will inversely apply all the transformations I made to the new values and get forecasted daily electricity consumption values. 
+
+# 2.Data Manipulation and Achieving Stationarity 
+
+## a.Data Manipulation
+
+From [EPIAS Transperency Platform](https://seffaflik.epias.com.tr/transparency/tuketim/gerceklesen-tuketim/gercek-zamanli-tuketim.xhtml), hourly electricity consumption values are taken. Since I will forecast daily values, I will take the mean of each days hourly consumption values. Summing them is also a choice, but we can always get the daily sum by simply multiplying daily mean with 24. Besides, studying with mean is easier to follow in the sense that values are smaller than that of summed case.
+
+```{r manipulation, message =FALSE}
+library(data.table)
+library(knitr)
+library(zoo)
+library(readxl)
+library(corrplot)
+library(ggplot2)
+library(lubridate)
+library(forecast)
+library(urca)
+
+dt = data.table(read_excel("ElectricityConsumption.xlsx", skip = 2, col_names= c("Date","Hour","Consumption")))
+dt$Date = parse_date_time(dt$Date, "dmY")
+dt[,Date:=as.Date(Date,format='%d-%m-%Y')]
+dt_daily = copy(dt)
+dt_daily[,dailyMeanConsumption:=mean(Consumption),by=Date]
+dt_daily = dt_daily[!duplicated(Date)]
+dt_daily[, Hour:=NULL]
+dt_daily[, Consumption:=NULL]
+
+plot(dt_daily, type = "l",
+     ylab="Daily Mean Consumption (MWh)",
+     main="Daily Mean Electricity Consumption in Turkey over 2017-2021")
+```
+
+Here is the plot of daily mean consumption.Firstly, although there exists a seasonality at each year, there is no obvious trend. We can easily eliminate seasonality by simply using a model with months as factors. 
+
+Another important thing to look is the autocorrelation function of our data. Before taking a look, it is reasonable to assume that there may be a large value at lag 7 since at each day of week, the consumption of electricity in workplaces will be similar to the consumption at the same day last week. 
+
+## b.Stationarity
+
+### Check for Autocorrelation
+
+```{r}
+par(mfrow = c(1,2))
+acf(dt_daily$dailyMeanConsumption, main = "Autocorrealtion of daily mean")
+pacf(dt_daily$dailyMeanConsumption, main = "Partial Autocorrealtion of daily mean")
+```
+
+It seems that there are autocorrelations at lags 1,7 and 8. Differencing at lag 1 can solve the autocorrelation at lag 1. Lag 7 may be because of the weekly seasonality I mentioned. Lag 8 might be because of a combined effect of lags 1 and 7.
+
+```{r}
+dt_daily[, lag1:= shift(dailyMeanConsumption, 1)]
+dt_daily[, diff1:=dailyMeanConsumption - lag1]
+acf(dt_daily$diff1, na.action = na.pass)
+dt_daily$diff1%>%ur.kpss()%>%summary()
+```
+
+By differencing at lag 1, we can see that the large autocorrelation at lag 1 and 8 are disappeared. In the case at lag 7, high autocorrelation will be taken care of by adding weekdays as factors to the model.
+
+### Linear Regression Models for Seasonal Effects
+
+```{r seasonality}
+#addintion of month and weekday columns to the data table
+dt_daily[, month:= month(Date)]
+dt_daily[, index:=1:.N]
+dt_daily[, weekday:=index%%7]
+
+#formation of the model
+fit = lm(formula = diff1~ as.factor(weekday)+ as.factor(month) , data = dt_daily)
+summary(fit)
+```
+
+First thing that we see is that actually months are not that relevant to our model. That is simply because of the differencing we did. Subtracting two consecutive days neutralized the effect of months. To see how our models performance changes, lets create another model with only weekdays as factors.
+
+```{r}
+#formation of the model
+fit2 = lm(formula = diff1~ as.factor(weekday), data = dt_daily)
+summary(fit2)
+```
+
+By omitting months from our model, we can say we achieved a better model by looking at the slight improvements of residual standard error and adjusted r-squared values. Therefore, I will adopt this model and continue.
+
+```{r plot}
+
+dt_daily[, SeasonalityAdjustedDiff:= c(NA,fit2$residuals)]
+
+acf(dt_daily$SeasonalityAdjustedDiff, na.action = na.pass, main="Autocorrelation of differences")
+
+dt_daily$SeasonalityAdjustedDiff%>%ur.kpss()%>%summary()
+```
+
+As we can see, after differencing, there is not any high autocorrelation value left. The p-value for kpss test is small enough that the null hypothesis that the data is stationary can not be rejected at any of the critical significance levels. To improve our model, outliers such as holidays can be handled. Doing outlier analysis may result in a better acf. 
+
+## c.Outliers
+
+```{r}
+
+plot(y=dt_daily$SeasonalityAdjustedDiff, x=dt_daily$Date, xlab="Date",
+     ylab = "Seasonality Adjusted Difference", main = "Daily Differenced Mean Electricity Consumption in Turkey over 2017-2021")
+
+```
+By looking at the plot we can say that there are some outliers whose existence may be damaging our model. There are several ways to deal with outliers. One way of dealing with them is manually marking and then adjusting them using values from one week before and after. However, this method is time consuming in the sense that we need to manually all of the holidays. Therefore, I am going to mark points with absolute seasonality adjusted difference bigger than 2000 as outlier points because data seems to be located mostly between -2000 and 2000.  
+
+```{r}
+#outlier
+dt_daily[,special:=0]
+dt_daily[abs(SeasonalityAdjustedDiff) > 2000, special := 1]
+dt_daily[, outlieradjusted := SeasonalityAdjustedDiff]
+
+dt_daily[, difflag7 := shift(SeasonalityAdjustedDiff, 7)]
+dt_daily[, difffor7 := shift(SeasonalityAdjustedDiff, -7)]
+
+dt_daily[special == 1, outlieradjusted := (difflag7 + difffor7)/2]
+
+plot(dt_daily$outlieradjusted)
+
+```
+
+After adjusting outliers, our plot seems to have more uniform variance. Now we can proceed into modeling with arima.
+
+# 3.Arima Model and Predictions
+
+## a.Arima Model
+
+```{r}
+
+model = auto.arima(dt_daily$outlieradjusted, seasonal = F)
+summary(model)
+
+```
+
+Using auto.arima, most suitable model is the one with one autoregressive and two moving average terms. Now we can move on to predictions and see how well our model performs.
+
+## b.Predictions
+
+In this section, we will predict the differenced and seasonality adjusted residuals using the arima model we constructed. Then we will seasonalize our data by adding predictions from our daily factored model. And, finally we will transform this differenced predictions to predictions of daily mean consumptions by using the consumption of 8th January to predict the 9th and so on. 
+
+```{r predict}
+
+#forecast the differenced and seasonality subtracted daily mean consumption
+forecasted = forecast(model, h=14)
+predictions = rep(0, length.out = 14)
+
+weekday = c(0:6,0:6)
+
+#predict the effect of days for next two week
+seasonalComp = predict(fit2, newdata = data.frame(weekday))
+
+#Add seasonality to the forecasted differences
+predictions = forecasted$mean
+predictions = predictions + seasonalComp 
+
+#yt_1 is the mean consumption of the last day in our data
+yt_1 = dt_daily[.N, dailyMeanConsumption]
+
+#Using yt_1 transform first prediction of difference to the prediction of the mean consumption.
+predictions[1] = predictions[1] + yt_1 
+
+#Transform all differences in the prediction vector into consumption values.
+for(j in 2:14){
+  predictions[j] = predictions[j] + predictions[j-1]
+}
+
+predictions = as.data.table(predictions)
+
+Date = as.Date('2021-01-09')
+for(k in 2:14){
+  Date[k] = Date[k-1]+1
+}
+Date = as.data.table(Date)
+predictions = cbind(Date, predictions)
+predictions
+```
+
+Here above our predictions for next two weeks starting from 9th January 2021. Inverse transformation steps of the prediction is also commented in the code. Now that we have our predictions, we can evaluate our predictions and, naturally, our model. 
+
+# 4.Model Performance and Conclusion
+
+Because this homework is submitted on 29th January, I have the actual consumption data for forecasted days. Now I will put them into another vector and apply some statistical tests to see how well our model predicted.  
+
+```{r}
+
+v = c(34781.56,31841.90,36431.46,36897.99,37409.87,38056.05,38170.38,
+      35667.35,32557.96,38447.89,39723.73,39960.92,39791.07,38902.97)
+
+predictions[, real:=v]
+
+statsind = function(actual, forecasted){
+   n=length(actual)
+   error = actual-forecasted
+   bias = error/actual
+   wmape = abs(error)/actual
+   l = data.frame(actual, forecasted, error, bias, wmape)
+   return(l)
+}
+
+stats <- function(actual, forecasted){
+  n=length(actual)
+  error = actual-forecasted
+  mean=mean(actual)
+  sd=sd(actual)
+  bias = sum(error)/sum(actual)
+  mape = sum(abs(error/actual))/n
+  mad = sum(abs(error))/n
+  wmape = mad/mean
+  l = data.frame(n,mean,sd,bias,mape,mad,wmape)
+  return(l)
+}
+
+statsind(v, predictions$x[1:14])
+stats(v, predictions$x[1:14])
+```
+
+Here above are firstly our models performance for each day and then an overall performance analysis. Looking at weighted mean absolute percentage error (wmape), we can say that we were able to guess this two weeks' mean consumption with a n error rate of 2.8%. However, these statistics are not that much useful just by themselves. We simply need a base case or statistics for other models to decide whether or not to adopt this model. Therefore, Let's look at another case. For a base scenario, because we observed a high autocorrelation at lag 7, I will us last weeks' mean consumption values.
+
+```{r}
+base = rep(tail(dt_daily$dailyMeanConsumption,7),2)
+stats(v, base)
+```
+
+
+In this base case prediction, each day's mean consumption is predicted as equal to the that of one week before. Because we need to predict 14 days, last week of our data iterated twice. Wmape of this model is 6.2%, suggesting that our model did a better job at predicting the daily mean electricity consumption. 
+
+In conclusion, to get a forecast model, we firstly made sure that we have a stationary series by performing certain transformations on it. And we used an arima model to forecast the residuals, inversely transformed them into new predictions. To have a more stationary series, we also removed some outliers because we could explain them with other information such as them being holidays which can not be seen by just looking at the daily mean consumption values. At last, we get a decent model with small error statistics. However, a model can always be improved into a better one. Some ideas regarding such improvements may be a more detailed outlier analysis such as working with percentiles or adding new independent variables related to electricity consumption such as daily mean temperature values.  
+
+

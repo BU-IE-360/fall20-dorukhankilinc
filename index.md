@@ -19,3 +19,7 @@
 ## Homework 3 (12/01/2021)
 
 [Here](files/hw3/hw3.html) is my time series regression model for clothing and footwear CPI 
+
+## Homework 4 (29/01/2021)
+
+[Here](files/hw4/hw4.html) is my arima model for daily electricity consumption
