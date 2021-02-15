@@ -23,3 +23,7 @@
 ## Homework 4 (29/01/2021)
 
 [Here](files/hw4/hw4.html) is my arima model for daily electricity consumption
+
+## Project (16/02/2021)
+
+[Here](files/project/project_report.html) is group 1's project report.
